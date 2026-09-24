@@ -1,19 +1,27 @@
 /**
  * Scheduler & Reconciler
  * 
- * Reconciles active giveaways against stored SQLite end-timestamps on boot and
- * schedules accurate conclusion timeouts with drift protection.
+ * Reconciles active giveaways against stored SQLite end-timestamps on boot and reconnects,
+ * schedules accurate conclusion timeouts with drift protection, and guarantees that giveaways
+ * survive host network outages and disconnections without data loss or premature conclusion.
  */
 
 const { giveawayRepository } = require('../database/repositories');
 const { endGiveaway } = require('./giveawayManager');
-const { LIMITS } = require('./constants');
 
 // In-memory registry of scheduled NodeJS.Timeout handles keyed by giveaway ID
 const activeTimeouts = new Map();
 
 // Maximum safe 32-bit signed integer delay for setTimeout (~24.85 days)
 const MAX_TIMEOUT_MS = 2147483647;
+
+// Short retry interval when host network is offline and conclusion is deferred
+const OFFLINE_RETRY_DELAY_MS = 15000;
+
+// Periodic safety reconcile interval (drift guard + offline recovery)
+const RECONCILE_INTERVAL_MS = 30000;
+
+let driftIntervalHandle = null;
 
 /**
  * Schedules the automatic conclusion of a giveaway.
@@ -27,12 +35,26 @@ function scheduleGiveaway(client, giveaway) {
 
   const remainingMs = giveaway.end_timestamp - Date.now();
 
-  // If the giveaway end timestamp has already passed, conclude immediately
+  // If the giveaway end timestamp has already passed, attempt immediate conclusion
   if (remainingMs <= 0) {
-    console.log(`[Scheduler] Giveaway #${giveaway.id} end timestamp has passed. Ending now...`);
-    endGiveaway(client, giveaway).catch((err) => {
-      console.error(`[Scheduler] Error concluding expired giveaway #${giveaway.id}:`, err);
-    });
+    console.log(`[Scheduler] Giveaway #${giveaway.id} end timestamp has passed (${remainingMs}ms). Concluding...`);
+    (async () => {
+      try {
+        const result = await endGiveaway(client, giveaway);
+        if (result?.deferred) {
+          console.warn(`[Scheduler] Giveaway #${giveaway.id} conclusion deferred (host network offline). Retrying in ${OFFLINE_RETRY_DELAY_MS / 1000}s...`);
+          const retryHandle = setTimeout(() => {
+            const current = giveawayRepository.getGiveawayById(giveaway.id);
+            if (current && current.status === 'active') {
+              scheduleGiveaway(client, current);
+            }
+          }, OFFLINE_RETRY_DELAY_MS);
+          activeTimeouts.set(giveaway.id, retryHandle);
+        }
+      } catch (err) {
+        console.error(`[Scheduler] Error concluding expired giveaway #${giveaway.id}:`, err);
+      }
+    })();
     return;
   }
 
@@ -52,9 +74,22 @@ function scheduleGiveaway(client, giveaway) {
       // Still has remaining time (e.g., if delay was capped by MAX_TIMEOUT_MS)
       scheduleGiveaway(client, current);
     } else {
-      await endGiveaway(client, current).catch((err) => {
+      const result = await endGiveaway(client, current).catch((err) => {
         console.error(`[Scheduler] Error ending giveaway #${current.id}:`, err);
+        return null;
       });
+
+      // If network was offline when the timer fired, schedule retry
+      if (result?.deferred) {
+        console.warn(`[Scheduler] Giveaway #${current.id} conclusion deferred (host network offline). Retrying in ${OFFLINE_RETRY_DELAY_MS / 1000}s...`);
+        const retryHandle = setTimeout(() => {
+          const recheck = giveawayRepository.getGiveawayById(current.id);
+          if (recheck && recheck.status === 'active') {
+            scheduleGiveaway(client, recheck);
+          }
+        }, OFFLINE_RETRY_DELAY_MS);
+        activeTimeouts.set(current.id, retryHandle);
+      }
     }
   }, safeDelay);
 
@@ -75,6 +110,44 @@ function cancelScheduledGiveaway(giveawayId) {
 }
 
 /**
+ * Reconciles all active giveaways from the database.
+ * Called on startup, on gateway reconnect (shardResume), and by the periodic drift guard.
+ * 
+ * @param {import('discord.js').Client} client
+ */
+function reconcileActiveGiveaways(client) {
+  try {
+    const activeGiveaways = giveawayRepository.getAllActiveGiveaways();
+    const now = Date.now();
+    let overdueCount = 0;
+
+    for (const giveaway of activeGiveaways) {
+      if (giveaway.end_timestamp <= now) {
+        overdueCount++;
+        cancelScheduledGiveaway(giveaway.id);
+        endGiveaway(client, giveaway)
+          .then((res) => {
+            if (res?.deferred) {
+              console.warn(`[Scheduler Reconciler] Giveaway #${giveaway.id} remains queued (waiting for network)...`);
+            }
+          })
+          .catch((err) => {
+            console.error(`[Scheduler Reconciler] Error concluding #${giveaway.id}:`, err);
+          });
+      } else if (!activeTimeouts.has(giveaway.id)) {
+        scheduleGiveaway(client, giveaway);
+      }
+    }
+
+    if (overdueCount > 0) {
+      console.log(`[Scheduler Reconciler] Reconciled ${activeGiveaways.length} active giveaway(s) (${overdueCount} overdue).`);
+    }
+  } catch (err) {
+    console.error('[Scheduler Reconciler] Error during reconciliation:', err);
+  }
+}
+
+/**
  * Initializes the scheduler on bot startup.
  * Loads all active giveaways from the database, recalculates remaining time,
  * and launches a safety drift check interval.
@@ -82,39 +155,22 @@ function cancelScheduledGiveaway(giveawayId) {
  * @param {import('discord.js').Client} client
  */
 function initScheduler(client) {
-  console.log('[Scheduler] Reconciling active giveaways from database...');
+  console.log('[Scheduler] Initializing giveaway scheduler & drift guard...');
 
-  const activeGiveaways = giveawayRepository.getAllActiveGiveaways();
-  console.log(`[Scheduler] Found ${activeGiveaways.length} active giveaway(s) to reconcile.`);
+  // Immediate reconciliation
+  reconcileActiveGiveaways(client);
 
-  for (const giveaway of activeGiveaways) {
-    scheduleGiveaway(client, giveaway);
+  // Periodic safety drift check & offline network recovery interval
+  if (!driftIntervalHandle) {
+    driftIntervalHandle = setInterval(() => {
+      reconcileActiveGiveaways(client);
+    }, RECONCILE_INTERVAL_MS);
   }
-
-  // Secondary Safety Interval:
-  // Runs every 60 seconds to safeguard against system sleep, clock drift, or missed timeouts
-  setInterval(() => {
-    try {
-      const active = giveawayRepository.getAllActiveGiveaways();
-      const now = Date.now();
-
-      for (const gw of active) {
-        if (gw.end_timestamp <= now) {
-          console.log(`[Scheduler Drift Guard] Found overdue giveaway #${gw.id}. Concluding...`);
-          cancelScheduledGiveaway(gw.id);
-          endGiveaway(client, gw).catch((err) => {
-            console.error(`[Scheduler Drift Guard] Failed to conclude #${gw.id}:`, err);
-          });
-        }
-      }
-    } catch (err) {
-      console.error('[Scheduler Drift Guard] Error during periodic check:', err);
-    }
-  }, LIMITS.RECONCILE_INTERVAL_MS);
 }
 
 module.exports = {
   scheduleGiveaway,
   cancelScheduledGiveaway,
+  reconcileActiveGiveaways,
   initScheduler,
 };

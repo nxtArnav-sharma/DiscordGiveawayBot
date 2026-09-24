@@ -38,8 +38,9 @@ function buildGiveawayEmbed(giveaway, entryCount, status = 'active', winnerIds =
   embed.setColor(isEnded ? COLORS.ENDED : COLORS.PRIMARY);
 
   // 2. Top Info Section
+  const prize = giveaway.prize || giveaway.title;
   const descLines = [
-    `🎁 **Prize:** ${giveaway.title}`,
+    `🎁 **Prize:** ${prize}`,
     `👤 **Hosted By:** <@${giveaway.host_id}>`,
   ];
 

@@ -193,14 +193,26 @@ module.exports = {
 
         const titleInput = new TextInputBuilder()
           .setCustomId('title')
-          .setLabel('Prize / Giveaway Title')
+          .setLabel('Giveaway Name')
           .setStyle(TextInputStyle.Short)
-          .setPlaceholder('e.g. Discord Nitro 1 Month')
+          .setPlaceholder('e.g. Summer Community Event / 1K Members Giveaway')
           .setMaxLength(256)
           .setRequired(true);
 
         if (existingConfig?.title) {
           titleInput.setValue(existingConfig.title);
+        }
+
+        const prizeInput = new TextInputBuilder()
+          .setCustomId('prize')
+          .setLabel('Prize')
+          .setStyle(TextInputStyle.Short)
+          .setPlaceholder('e.g. Discord Nitro 1 Month / $25 Steam Gift Card')
+          .setMaxLength(256)
+          .setRequired(true);
+
+        if (existingConfig?.prize) {
+          prizeInput.setValue(existingConfig.prize);
         }
 
         const winnersInput = new TextInputBuilder()
@@ -229,6 +241,7 @@ module.exports = {
 
         modal.addComponents(
           new ActionRowBuilder().addComponents(titleInput),
+          new ActionRowBuilder().addComponents(prizeInput),
           new ActionRowBuilder().addComponents(winnersInput),
           new ActionRowBuilder().addComponents(durationInput)
         );
@@ -269,6 +282,7 @@ module.exports = {
           guild_id: interaction.guildId,
           channel_id: targetChannel.id,
           title: config.title,
+          prize: config.prize || config.title,
           host_id: config.host_id,
           winner_count: config.winner_count,
           required_roles: config.required_roles,
@@ -349,7 +363,7 @@ module.exports = {
 
           if (channelActive.length > 1) {
             const list = channelActive
-              .map((g) => `• ID **${g.id}** (Msg: \`${g.message_id}\`): **${g.title}**`)
+              .map((g) => `• ID **${g.id}** (Msg: \`${g.message_id}\`): **${g.title}** (Prize: **${g.prize || g.title}**)`)
               .join('\n');
             return interaction.editReply({
               content:
@@ -364,7 +378,13 @@ module.exports = {
         cancelScheduledGiveaway(targetGiveaway.id);
 
         // Execute shared winner selection and conclude giveaway
-        await endGiveaway(interaction.client, targetGiveaway, { endedBy: interaction.user.id });
+        const results = await endGiveaway(interaction.client, targetGiveaway, { endedBy: interaction.user.id });
+
+        if (results?.deferred) {
+          return interaction.editReply({
+            content: `⏳ Host connection is currently interrupted. Giveaway #${targetGiveaway.id} conclusion is queued and will execute automatically the moment connection is re-established.`,
+          });
+        }
 
         return interaction.editReply({
           content: `✅ Giveaway #${targetGiveaway.id} ("${targetGiveaway.title}") has been ended.`,

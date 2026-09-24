@@ -36,12 +36,25 @@ async function handleConfigModalSubmit(interaction) {
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
   const rawTitle = interaction.fields.getTextInputValue('title')?.trim();
+  let rawPrize;
+  try {
+    rawPrize = interaction.fields.getTextInputValue('prize')?.trim();
+  } catch {
+    rawPrize = rawTitle; // Fallback for backward compatibility
+  }
+  if (!rawPrize) rawPrize = rawTitle;
+
   const rawWinners = interaction.fields.getTextInputValue('winners')?.trim();
   const rawDuration = interaction.fields.getTextInputValue('duration')?.trim();
 
-  // 1. Validate Title
+  // 1. Validate Giveaway Name
   if (!rawTitle || rawTitle.length === 0) {
-    return interaction.editReply({ content: '❌ Title/Prize cannot be empty.' });
+    return interaction.editReply({ content: '❌ **Giveaway Name** cannot be empty.' });
+  }
+
+  // 1b. Validate Prize
+  if (!rawPrize || rawPrize.length === 0) {
+    return interaction.editReply({ content: '❌ **Prize** cannot be empty.' });
   }
 
   // 2. Validate Winners count
@@ -144,6 +157,7 @@ async function handleConfigModalSubmit(interaction) {
   const configData = {
     guild_id: interaction.guildId,
     title: rawTitle,
+    prize: rawPrize,
     host_id: hostId,
     winner_count: winnerCount,
     duration_ms: durationMs,
@@ -164,7 +178,8 @@ async function handleConfigModalSubmit(interaction) {
     )
     .setColor(COLORS.SUCCESS)
     .addFields(
-      { name: 'Prize / Title', value: rawTitle, inline: false },
+      { name: 'Giveaway Name', value: rawTitle, inline: true },
+      { name: 'Prize', value: rawPrize, inline: true },
       { name: 'Hosted By', value: `<@${hostId}>`, inline: true },
       { name: 'Winners', value: `${winnerCount}`, inline: true },
       { name: 'Duration', value: `${formatDuration(durationMs)} (\`${rawDuration}\`)`, inline: true },

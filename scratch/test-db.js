@@ -17,7 +17,8 @@ const testHostId = 'test_user_host';
 
 // 1. Test Config Save & Get
 const configData = {
-  title: 'Nitro 1 Month',
+  title: 'Summer Community Celebration',
+  prize: 'Nitro 1 Month',
   host_id: testHostId,
   winner_count: 2,
   duration_ms: 3600000,
@@ -30,7 +31,8 @@ const configData = {
 configRepository.saveConfig(testGuildId, configData);
 const loadedConfig = configRepository.getConfig(testGuildId);
 
-assert.strictEqual(loadedConfig.title, 'Nitro 1 Month');
+assert.strictEqual(loadedConfig.title, 'Summer Community Celebration');
+assert.strictEqual(loadedConfig.prize, 'Nitro 1 Month');
 assert.strictEqual(loadedConfig.winner_count, 2);
 assert.strictEqual(loadedConfig.image_url, 'https://example.com/banner.png');
 assert.deepStrictEqual(loadedConfig.required_roles, ['role_1', 'role_2']);

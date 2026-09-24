@@ -6,6 +6,7 @@
  */
 
 const { entryRepository, winnerRepository } = require('../database/repositories');
+const { withNetworkRetry, isNetworkError, NetworkOfflineError } = require('./networkRetry');
 
 /**
  * Executes winner selection for a giveaway.
@@ -16,6 +17,7 @@ const { entryRepository, winnerRepository } = require('../database/repositories'
  * @param {number} [options.winnerCount] - Optional winner count override (for rerolls)
  * @param {string[]} [options.excludeUserIds] - User IDs to exclude (e.g. prior winners)
  * @param {boolean} [options.isReroll=false] - Whether this selection is a reroll
+ * @param {boolean} [options.skipRecord=false] - Whether to skip recording winners immediately
  * @returns {Promise<{
  *   winners: string[],
  *   totalEntries: number,
@@ -34,8 +36,20 @@ async function selectWinners(client, giveaway, options = {}) {
   const rawEntries = entryRepository.getEntries(giveaway.id);
   const totalEntries = rawEntries.length;
 
-  // Fetch the Discord Guild
-  const guild = await client.guilds.fetch(giveaway.guild_id).catch(() => null);
+  // Fetch the Discord Guild with network retry
+  let guild = null;
+  try {
+    guild = await withNetworkRetry(
+      () => client.guilds.fetch(giveaway.guild_id),
+      { context: `Guild Fetch (${giveaway.guild_id})`, maxRetries: 3 }
+    );
+  } catch (err) {
+    if (isNetworkError(err)) {
+      throw new NetworkOfflineError(`Network offline while fetching guild ${giveaway.guild_id}: ${err.message}`);
+    }
+    throw new Error(`Guild ${giveaway.guild_id} could not be fetched: ${err.message}`);
+  }
+
   if (!guild) {
     throw new Error(`Guild ${giveaway.guild_id} could not be fetched.`);
   }
@@ -55,8 +69,20 @@ async function selectWinners(client, giveaway, options = {}) {
       continue;
     }
 
-    // Check if member is still in the guild
-    const member = await guild.members.fetch(userId).catch(() => null);
+    // Check if member is still in the guild (with network retry)
+    let member = null;
+    try {
+      member = await withNetworkRetry(
+        () => guild.members.fetch(userId),
+        { context: `Member Fetch (${userId})`, maxRetries: 2 }
+      );
+    } catch (err) {
+      if (isNetworkError(err)) {
+        throw new NetworkOfflineError(`Network offline while checking entrant ${userId}: ${err.message}`);
+      }
+      // If error is 10007 (Unknown Member) or 404, user left guild -> member remains null
+    }
+
     if (!member) {
       console.log(`[Giveaway #${giveaway.id}] User ${userId} is no longer in guild "${guild.name}", disqualified.`);
       continue;
@@ -128,7 +154,7 @@ async function selectWinners(client, giveaway, options = {}) {
   }
 
   // 5. Record winners in the database
-  if (selectedWinners.length > 0) {
+  if (selectedWinners.length > 0 && !options.skipRecord) {
     winnerRepository.recordWinners(giveaway.id, selectedWinners, isReroll);
   }
 

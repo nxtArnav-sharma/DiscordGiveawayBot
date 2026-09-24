@@ -11,7 +11,8 @@ const mockGiveaway = {
   id: 42,
   guild_id: 'guild_123',
   channel_id: 'chan_456',
-  title: 'GTA V Giveaway',
+  title: 'Weekly Community Milestone',
+  prize: 'Grand Theft Auto V',
   host_id: '1031935053695037542',
   winner_count: 1,
   required_roles: [],
@@ -24,8 +25,8 @@ const mockGiveaway = {
 const activeEmbed = buildGiveawayEmbed(mockGiveaway, 0, 'active');
 const activeJson = activeEmbed.toJSON();
 
-assert.strictEqual(activeJson.title, '🎉 GTA V Giveaway');
-assert(activeJson.description.includes('🎁 **Prize:** GTA V Giveaway'));
+assert.strictEqual(activeJson.title, '🎉 Weekly Community Milestone');
+assert(activeJson.description.includes('🎁 **Prize:** Grand Theft Auto V'));
 assert(activeJson.description.includes('👤 **Hosted By:** <@1031935053695037542>'));
 assert(activeJson.description.includes('-----------------'));
 
@@ -51,8 +52,8 @@ console.log('✔ Active clean embed layout and fields verified');
 const endedEmbed = buildGiveawayEmbed(mockGiveaway, 12, 'ended', ['1031935053695037542']);
 const endedJson = endedEmbed.toJSON();
 
-assert.strictEqual(endedJson.title, '🎉 GTA V Giveaway (ENDED)');
-assert(endedJson.description.includes('🎁 **Prize:** GTA V Giveaway'));
+assert.strictEqual(endedJson.title, '🎉 Weekly Community Milestone (ENDED)');
+assert(endedJson.description.includes('🎁 **Prize:** Grand Theft Auto V'));
 assert(endedJson.description.includes('👤 **Hosted By:** <@1031935053695037542>'));
 assert(endedJson.description.includes('🏆 **Winners:** <@1031935053695037542>'));
 assert(endedJson.description.includes('-----------------'));

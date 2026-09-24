@@ -36,6 +36,7 @@ const configRepository = {
     return {
       guild_id: row.guild_id,
       title: row.title,
+      prize: row.prize || row.title,
       host_id: row.host_id,
       winner_count: Number(row.winner_count),
       duration_ms: Number(row.duration_ms),
@@ -55,11 +56,12 @@ const configRepository = {
   saveConfig(guildId, config) {
     const stmt = db.prepare(`
       INSERT INTO guild_configs (
-        guild_id, title, host_id, winner_count, duration_ms,
+        guild_id, title, prize, host_id, winner_count, duration_ms,
         required_roles, blacklisted_roles, guaranteed_winner_ids, image_url, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(guild_id) DO UPDATE SET
         title = excluded.title,
+        prize = excluded.prize,
         host_id = excluded.host_id,
         winner_count = excluded.winner_count,
         duration_ms = excluded.duration_ms,
@@ -73,6 +75,7 @@ const configRepository = {
     stmt.run(
       guildId,
       config.title,
+      config.prize || config.title,
       config.host_id,
       config.winner_count,
       config.duration_ms,
@@ -97,6 +100,7 @@ function formatGiveawayRow(row) {
     channel_id: row.channel_id,
     message_id: row.message_id,
     title: row.title,
+    prize: row.prize || row.title,
     host_id: row.host_id,
     winner_count: Number(row.winner_count),
     required_roles: safeParseJson(row.required_roles),
@@ -118,10 +122,10 @@ const giveawayRepository = {
   createGiveaway(data) {
     const stmt = db.prepare(`
       INSERT INTO giveaways (
-        guild_id, channel_id, message_id, title, host_id,
+        guild_id, channel_id, message_id, title, prize, host_id,
         winner_count, required_roles, blacklisted_roles,
         guaranteed_winner_ids, image_url, end_timestamp, status, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)
     `);
 
     const result = stmt.run(
@@ -129,6 +133,7 @@ const giveawayRepository = {
       data.channel_id,
       data.message_id,
       data.title,
+      data.prize || data.title,
       data.host_id,
       data.winner_count,
       JSON.stringify(data.required_roles || []),
@@ -327,6 +332,16 @@ const winnerRepository = {
   getWinners(giveawayId) {
     const stmt = db.prepare('SELECT * FROM giveaway_winners WHERE giveaway_id = ? ORDER BY selected_at ASC');
     return stmt.all(Number(giveawayId));
+  },
+
+  /**
+   * Remove uncommitted winner records for a giveaway (used during retry recovery).
+   * @param {number} giveawayId
+   * @param {boolean} [isReroll=false]
+   */
+  clearWinners(giveawayId, isReroll = false) {
+    const stmt = db.prepare('DELETE FROM giveaway_winners WHERE giveaway_id = ? AND is_reroll = ?');
+    stmt.run(Number(giveawayId), isReroll ? 1 : 0);
   },
 };
 

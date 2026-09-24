@@ -39,6 +39,7 @@ dbInstance.exec(`
   CREATE TABLE IF NOT EXISTS guild_configs (
     guild_id TEXT PRIMARY KEY,
     title TEXT NOT NULL,
+    prize TEXT NOT NULL DEFAULT '',
     host_id TEXT NOT NULL,
     winner_count INTEGER NOT NULL DEFAULT 1,
     duration_ms INTEGER NOT NULL,
@@ -56,6 +57,7 @@ dbInstance.exec(`
     channel_id TEXT NOT NULL,
     message_id TEXT NOT NULL UNIQUE,
     title TEXT NOT NULL,
+    prize TEXT NOT NULL DEFAULT '',
     host_id TEXT NOT NULL,
     winner_count INTEGER NOT NULL DEFAULT 1,
     required_roles TEXT NOT NULL DEFAULT '[]',
@@ -95,7 +97,19 @@ dbInstance.exec(`
   CREATE INDEX IF NOT EXISTS idx_winners_giveaway ON giveaway_winners(giveaway_id);
 `);
 
-// Safe migration for existing databases to add image_url if not already present
+// Safe migrations for existing databases
+try {
+  dbInstance.exec('ALTER TABLE guild_configs ADD COLUMN prize TEXT DEFAULT "";');
+} catch {
+  // Column already exists
+}
+
+try {
+  dbInstance.exec('ALTER TABLE giveaways ADD COLUMN prize TEXT DEFAULT "";');
+} catch {
+  // Column already exists
+}
+
 try {
   dbInstance.exec('ALTER TABLE guild_configs ADD COLUMN image_url TEXT;');
 } catch {

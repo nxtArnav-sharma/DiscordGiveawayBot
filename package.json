@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node index.js",
     "deploy": "node deploy-commands.js",
-    "test": "node scratch/test-duration.js && node scratch/test-embed.js && node scratch/test-winner-selection.js && node scratch/test-multi-guaranteed.js && node scratch/test-db.js"
+    "test": "node scratch/test-duration.js && node scratch/test-embed.js && node scratch/test-winner-selection.js && node scratch/test-multi-guaranteed.js && node scratch/test-db.js && node scratch/test-network-resilience.js"
   },
   "dependencies": {
     "discord.js": "^14.27.0",
